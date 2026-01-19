@@ -1,0 +1,103 @@
+/* 基本布局 */
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    background-color: #f7f7f7;
+    color: #333;
+}
+
+/* 头部 */
+header {
+    background-color: #1e90ff;
+    color: #fff;
+    padding: 20px;
+    text-align: center;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 2em;
+}
+
+header p {
+    margin: 5px 0;
+}
+
+/* 主体内容 */
+section {
+    margin: 20px;
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+h2 {
+    font-size: 1.5em;
+    color: #1e90ff;
+    margin-bottom: 10px;
+}
+
+/* 列表样式 */
+ul {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+ul li {
+    margin-bottom: 10px;
+    padding-left: 1.5em;
+    position: relative;
+}
+
+ul li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    font-size: 1.5em;
+    color: #1e90ff;
+}
+
+/* 页脚 */
+footer {
+    text-align: center;
+    padding: 10px;
+    background-color: #1e90ff;
+    color: #fff;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+}
+
+/* 超链接样式 */
+a {
+    color: #1e90ff;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* 响应式设计：小屏设备 */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 1.5em;
+    }
+
+    section {
+        margin: 10px;
+        padding: 15px;
+    }
+
+    h2 {
+        font-size: 1.3em;
+    }
+
+    footer {
+        font-size: 0.8em;
+    }
+}
+
