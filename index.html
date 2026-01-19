@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth overflow-x-hidden">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamNotes - Flow State Journaling</title>
+    <meta name="description" content="A minimalist, file-system based daily journal for macOS.">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        body: ['Inter', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    },
+                    animation: {
+                        'blob': 'blob 7s infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                        'fade-up': 'fadeUp 0.8s ease-out forwards',
+                        'packet-left': 'packetLeft 2s linear infinite',
+                        'pulse-impact': 'pulseImpact 2s linear infinite',
+                        'fade-in': 'fadeIn 0.3s ease-out forwards',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-20px)' },
+                        },
+                        fadeUp: {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        fadeIn: {
+                            '0%': { opacity: '0', transform: 'translateY(5px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        packetLeft: {
+                            '0%': { left: '0%', opacity: '0', width: '0%' },
+                            '10%': { opacity: '1', width: '20%' }, 
+                            '45%': { width: '40%' }, 
+                            '50%': { left: '100%', opacity: '1', width: '0%' }, 
+                            '51%': { opacity: '0' },
+                            '100%': { left: '100%', opacity: '0' },
+                        },
+                        pulseImpact: {
+                            '0%, 48%': { transform: 'scale(1)', boxShadow: '0 0 0 rgba(0,0,0,0)', borderColor: '#fef3c7' }, 
+                            '50%': { transform: 'scale(1.02)', boxShadow: '0 0 15px rgba(245, 158, 11, 0.2)', borderColor: '#f59e0b' }, 
+                            '55%, 100%': { transform: 'scale(1)', boxShadow: '0 0 0 rgba(0,0,0,0)', borderColor: '#fef3c7' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .glass {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .glass-dark {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .bento-card {
+            @apply bg-white rounded-3xl p-8 border border-slate-100 shadow-sm transition-all duration-300 hover:shadow-xl hover:-translate-y-1 relative overflow-hidden;
+        }
+        .text-gradient {
+            background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        /* Custom scrollbar hiding for clean UI */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* Editor syntax highlighting simulation */
+        .syntax-tag { color: #0ea5e9; font-weight: 600; }
+        .syntax-comment { color: #94a3b8; font-style: italic; }
+        .syntax-highlight { background-color: #f0f9ff; border-radius: 4px; padding: 0 4px; }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-slate-50 text-slate-900 font-body antialiased overflow-x-hidden selection:bg-brand-200 selection:text-brand-900">
+
+    <!-- Ambient Background -->
+    <div class="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+        <div class="absolute top-0 left-1/4 w-[800px] h-[800px] bg-brand-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob"></div>
+        <div class="absolute top-0 right-1/4 w-[600px] h-[600px] bg-purple-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
+        <div class="absolute -bottom-32 left-1/3 w-[600px] h-[600px] bg-pink-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
+    </div>
+
+    <!-- Navigation (Absolute positioning to scroll with page) -->
+    <nav class="absolute top-6 w-full z-50 px-4">
+        <div class="max-w-5xl mx-auto">
+            <div class="glass rounded-full px-6 py-3 flex items-center justify-between shadow-lg shadow-black/5">
+                <a href="#" class="flex items-center gap-2 group">
+                    <div class="bg-slate-900 text-white p-1.5 rounded-lg group-hover:rotate-12 transition-transform">
+                        <i data-lucide="pen-tool" class="w-4 h-4"></i>
+                    </div>
+                    <span class="font-sans font-bold text-lg tracking-tight">StreamNotes</span>
+                </a>
+                
+                <div class="hidden md:flex items-center gap-1">
+                    <a href="#philosophy" class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-full hover:bg-white/50 transition-all">Philosophy</a>
+                    <a href="#openness" class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-full hover:bg-white/50 transition-all">Ecosystem</a>
+                    <a href="#features" class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900 rounded-full hover:bg-white/50 transition-all">Features</a>
+                </div>
+
+                <a href="https://github.com/raywill/dailynotes/releases" class="bg-slate-900 text-white px-5 py-2 rounded-full text-sm font-semibold hover:bg-slate-800 transition-all hover:scale-105 shadow-lg shadow-brand-500/20 flex items-center gap-2">
+                    <i data-lucide="download" class="w-4 h-4"></i> Download
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="pt-48 pb-32 px-4 relative overflow-hidden">
+        <div class="max-w-4xl mx-auto text-center relative z-10">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/80 border border-slate-200 backdrop-blur-sm text-slate-600 text-xs font-bold uppercase tracking-widest mb-8 animate-fade-up">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                v1.0 Available for macOS
+            </div>
+            
+            <h1 class="text-6xl md:text-8xl font-sans font-bold tracking-tight text-slate-900 mb-8 leading-[0.95] animate-fade-up" style="animation-delay: 0.1s">
+                Capture the<br>
+                <span class="text-gradient">Flow State.</span>
+            </h1>
+            
+            <p class="text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed animate-fade-up" style="animation-delay: 0.2s">
+                A daily journal that removes the friction of "organizing."<br>
+                <span class="text-slate-900 font-medium">No folders. No cloud login. Just a fresh page, every day.</span>
+            </p>
+
+            <!-- CTA Buttons -->
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16 animate-fade-up" style="animation-delay: 0.25s">
+                <a href="https://github.com/raywill/dailynotes/releases" class="group bg-slate-900 text-white px-8 py-4 rounded-full text-base font-semibold hover:bg-slate-800 transition-all hover:shadow-xl hover:-translate-y-1 flex items-center gap-2">
+                    <i data-lucide="download" class="w-5 h-5 group-hover:animate-bounce"></i> 
+                    Download for macOS
+                </a>
+                <a href="https://github.com/raywill/dailynotes" class="group bg-white text-slate-700 border border-slate-200 px-8 py-4 rounded-full text-base font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all hover:-translate-y-1 flex items-center gap-2">
+                    <i data-lucide="github" class="w-5 h-5 text-slate-900"></i>
+                    View on GitHub
+                </a>
+            </div>
+
+            <!-- Abstract Visual Representation of "Flow" -->
+            <div class="relative w-full max-w-3xl mx-auto h-64 md:h-80 animate-fade-up" style="animation-delay: 0.3s">
+                <!-- Card 1: Yesterday (Fading) -->
+                <div class="absolute left-0 top-8 w-64 h-48 glass rounded-2xl p-6 transform -rotate-6 scale-90 opacity-60 z-0 border-slate-200">
+                    <div class="h-2 w-20 bg-slate-300 rounded mb-4"></div>
+                    <div class="space-y-2">
+                        <div class="h-1.5 w-full bg-slate-200 rounded"></div>
+                        <div class="h-1.5 w-4/5 bg-slate-200 rounded"></div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Today (Active) -->
+                <div class="absolute left-1/2 -translate-x-1/2 top-0 w-80 md:w-96 h-56 md:h-64 bg-white rounded-2xl shadow-2xl p-8 transform z-10 border border-slate-100 flex flex-col justify-between animate-float">
+                    <div>
+                        <div class="flex items-center justify-between mb-6">
+                            <span class="font-mono text-sm text-brand-600 font-bold bg-brand-50 px-2 py-1 rounded">2026-01-01 (Today)</span>
+                            <div class="flex gap-1.5">
+                                <div class="w-2.5 h-2.5 rounded-full bg-red-400"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-amber-400"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
+                            </div>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="h-3 w-full bg-slate-100 rounded animate-pulse"></div>
+                            <div class="h-3 w-3/4 bg-slate-100 rounded animate-pulse" style="animation-delay: 0.1s"></div>
+                            <div class="h-3 w-5/6 bg-slate-100 rounded animate-pulse" style="animation-delay: 0.2s"></div>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full">#ideas</span>
+                        <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full">#journal</span>
+                    </div>
+                </div>
+
+                <!-- Card 3: Tomorrow (Waiting) -->
+                <div class="absolute right-0 top-8 w-64 h-48 glass rounded-2xl p-6 transform rotate-6 scale-90 opacity-60 z-0 border-slate-200 flex items-center justify-center">
+                    <div class="text-slate-300 font-sans font-bold text-2xl">Tomorrow</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Section 1: Philosophy (Structured Grid) -->
+    <section id="philosophy" class="py-24 px-4 bg-white/50 border-y border-slate-100">
+        <div class="max-w-6xl mx-auto">
+            <div class="mb-16 md:text-center max-w-3xl mx-auto">
+                <span class="text-brand-600 font-bold tracking-wider uppercase text-sm">The Philosophy</span>
+                <h2 class="text-3xl md:text-5xl font-sans font-bold mt-2 mb-4 text-slate-900">Let It Flow.</h2>
+                <p class="text-slate-600 text-xl leading-relaxed">Stop organizing. Stop categorizing. Just write. StreamNotes flows like a stream.<br /> Each day is a <b>fresh</b> page.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <!-- Point 1 -->
+                <div class="p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="waves" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-slate-900">Stream, Not Library</h3>
+                    <p class="text-slate-600 leading-relaxed text-sm">
+                        Friction kills the habit. We spend more time deciding "where does this go?" than writing. StreamNotes removes this barrier completely.
+                    </p>
+                </div>
+
+                <!-- Point 2 -->
+                <div class="p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <div class="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="folder-x" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-slate-900">No Folders</h3>
+                    <p class="text-slate-600 leading-relaxed text-sm">
+                        Yesterday is yesterday. Today is today. Temporal organization is effortless and automatic.
+                    </p>
+                </div>
+
+                <!-- Point 3 -->
+                <div class="p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <div class="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="zap" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-slate-900">Zero Mental Overhead</h3>
+                    <p class="text-slate-600 leading-relaxed text-sm">
+                        Just open and write. No "Should this be in Projects?". The lowest barrier to capture means you'll actually capture everything.
+                    </p>
+                </div>
+
+                <!-- Point 4 -->
+                <div class="p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <div class="w-12 h-12 bg-pink-50 text-pink-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="hash" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-slate-900">Tags Emerge Naturally</h3>
+                    <p class="text-slate-600 leading-relaxed text-sm">
+                        Organization is inverted. Use inline tags (#todo, #idea) as you write. Structure emerges from your workflow, not before it.
+                    </p>
+                </div>
+
+                <!-- Point 5 -->
+                <div class="p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="search" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-slate-900">Trust Search</h3>
+                    <p class="text-slate-600 leading-relaxed text-sm">
+                        Your brain remembers context ("it was last Tuesday"). You don't need perfect organization—you need perfect retrieval.
+                    </p>
+                </div>
+
+                <!-- Point 6 -->
+                <div class="p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                    <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="hourglass" class="w-6 h-6"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-slate-900">Embrace Impermanence</h3>
+                    <p class="text-slate-600 leading-relaxed text-sm">
+                        Most notes are scaffolding. Let irrelevant content fade into the archive. It's there if you need it, but not cluttering your mind.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 2: Radical Openness (The Ecosystem) -->
+    <section id="openness" class="py-24 bg-white border-y border-slate-100">
+        <div class="max-w-6xl mx-auto px-4">
+            <div class="mb-10">
+                <span class="text-brand-600 font-bold tracking-wider uppercase text-sm">The Ecosystem</span>
+                <h2 class="text-4xl font-sans font-bold mt-2 mb-6">Your Data, Your Rules.</h2>
+                <p class="text-lg text-slate-600 max-w-2xl">
+                    StreamNotes is essentially a beautiful interface for your filesystem. We use standard Markdown files, making your notes compatible with the entire developer ecosystem.
+                </p>
+            </div>
+
+            <!-- Data Flow Visualization -->
+            <div class="relative w-full bg-slate-50 border border-slate-200 rounded-3xl overflow-hidden mb-16 hidden lg:block">
+                <!-- Subtle grid background -->
+                <div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(#64748b 1px, transparent 1px); background-size: 24px 24px;"></div>
+                
+                <div class="relative z-10 p-12 flex items-stretch justify-between gap-0 h-[400px]">
+                    
+                    <!-- 1. Source: StreamNotes App (Left) -->
+                    <div class="flex flex-col items-center justify-center gap-4 w-48 relative z-20">
+                        <div class="w-24 h-24 bg-white rounded-2xl shadow-lg border border-slate-200 flex flex-col items-center justify-center group hover:-translate-y-1 transition-transform">
+                            <div class="bg-slate-900 text-white p-2 rounded-lg mb-2">
+                                <i data-lucide="pen-tool" class="w-6 h-6"></i>
+                            </div>
+                            <span class="text-xs font-bold text-slate-900">StreamNotes</span>
+                        </div>
+                    </div>
+
+                    <!-- CONNECTION 1: App to FileSystem (Green Laser Beam) -->
+                    <div class="flex-1 relative flex items-center justify-center -mx-4 z-0">
+                        <!-- The Track -->
+                        <div class="w-full h-[1px] bg-slate-200 relative overflow-visible">
+                            <!-- The Laser Pulse -->
+                            <div class="absolute top-1/2 -translate-y-1/2 h-[3px] bg-gradient-to-r from-transparent via-[#39ff14] to-transparent shadow-[0_0_8px_#39ff14] animate-packet-left z-10 rounded-full"></div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Hub: Filesystem (Middle - WIDER & Pulsing) -->
+                    <div class="flex flex-col items-center justify-center gap-4 w-80 relative z-20 mx-4">
+                        <div class="w-full h-32 bg-amber-50 rounded-2xl shadow-xl border border-amber-100 flex flex-col items-center justify-center relative ring-4 ring-white animate-pulse-impact origin-center">
+                            <i data-lucide="folder-open" class="w-10 h-10 text-amber-500 mb-2"></i>
+                            <div class="font-mono text-sm font-bold text-amber-900 px-4 py-1 bg-amber-100/50 rounded text-center break-all">~/Documents/StreamNotes/</div>
+                            <span class="text-[10px] text-amber-600 mt-2 font-mono border border-amber-200 px-2 rounded bg-white">Format: .md</span>
+                        </div>
+                    </div>
+
+                    <!-- CONNECTION 2: FileSystem to Tools (Curved Paths with Small Circular Particles) -->
+                    <div class="flex-1 relative z-0 -mx-4">
+                         <!-- SVG Viewbox aligned to cover this area -->
+                         <svg class="absolute inset-0 w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
+                            <defs>
+                                <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" style="stop-color:#cbd5e1;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#cbd5e1;stop-opacity:0.2" />
+                                </linearGradient>
+                            </defs>
+                            
+                            <!-- Path 1 (Top) -->
+                            <path id="path1" d="M 0 50 C 40 50, 40 10, 100 10" stroke="url(#grad1)" stroke-width="0.5" fill="none" vector-effect="non-scaling-stroke" />
+                            <!-- Using slightly smaller circle radius to minimize distortion effect -->
+                            <circle r="1.5" fill="#9333ea">
+                                <animateMotion dur="2s" repeatCount="indefinite" keyPoints="0;0;1" keyTimes="0;0.5;1">
+                                    <mpath href="#path1"/>
+                                </animateMotion>
+                                <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5;0.51;0.9;1" dur="2s" repeatCount="indefinite" />
+                            </circle>
+                            
+                            <!-- Path 2 -->
+                            <path id="path2" d="M 0 50 C 50 50, 50 36, 100 36" stroke="url(#grad1)" stroke-width="0.5" fill="none" vector-effect="non-scaling-stroke" />
+                            <circle r="1.5" fill="#2563eb">
+                                <animateMotion dur="2s" repeatCount="indefinite" keyPoints="0;0;1" keyTimes="0;0.5;1">
+                                    <mpath href="#path2"/>
+                                </animateMotion>
+                                <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5;0.51;0.9;1" dur="2s" repeatCount="indefinite" />
+                            </circle>
+
+                            <!-- Path 3 -->
+                            <path id="path3" d="M 0 50 C 50 50, 50 64, 100 64" stroke="url(#grad1)" stroke-width="0.5" fill="none" vector-effect="non-scaling-stroke" />
+                            <circle r="1.5" fill="#0ea5e9">
+                                <animateMotion dur="2s" repeatCount="indefinite" keyPoints="0;0;1" keyTimes="0;0.5;1">
+                                    <mpath href="#path3"/>
+                                </animateMotion>
+                                <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5;0.51;0.9;1" dur="2s" repeatCount="indefinite" />
+                            </circle>
+
+                            <!-- Path 4 (Bottom) -->
+                            <path id="path4" d="M 0 50 C 40 50, 40 90, 100 90" stroke="url(#grad1)" stroke-width="0.5" fill="none" vector-effect="non-scaling-stroke" />
+                            <circle r="1.5" fill="#059669">
+                                <animateMotion dur="2s" repeatCount="indefinite" keyPoints="0;0;1" keyTimes="0;0.5;1">
+                                    <mpath href="#path4"/>
+                                </animateMotion>
+                                <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5;0.51;0.9;1" dur="2s" repeatCount="indefinite" />
+                            </circle>
+                         </svg>
+                    </div>
+
+                    <!-- 3. Destinations (Right - Tightly Coupled) -->
+                    <div class="flex flex-col justify-between w-56 py-4 relative z-20">
+                        <!-- Tool 1 -->
+                        <div class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:scale-105 hover:border-purple-200 transition-all cursor-default">
+                            <div class="p-2 bg-purple-50 text-purple-600 rounded-lg"><i data-lucide="sparkles" class="w-5 h-5"></i></div>
+                            <div>
+                                <div class="text-sm font-bold text-slate-800">AI / Cursor</div>
+                                <div class="text-[10px] text-slate-500">Analytics & Summaries</div>
+                            </div>
+                        </div>
+                        <!-- Tool 2 -->
+                        <div class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:scale-105 hover:border-blue-200 transition-all cursor-default">
+                            <div class="p-2 bg-blue-50 text-blue-600 rounded-lg"><i data-lucide="file-code" class="w-5 h-5"></i></div>
+                            <div>
+                                <div class="text-sm font-bold text-slate-800">Obsidian / VS Code</div>
+                                <div class="text-[10px] text-slate-500">Knowledge Graph</div>
+                            </div>
+                        </div>
+                        <!-- Tool 3 -->
+                        <div class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:scale-105 hover:border-sky-200 transition-all cursor-default">
+                            <div class="p-2 bg-sky-50 text-sky-600 rounded-lg"><i data-lucide="cloud" class="w-5 h-5"></i></div>
+                            <div>
+                                <div class="text-sm font-bold text-slate-800">iCloud / Drive</div>
+                                <div class="text-[10px] text-slate-500">Multi-device Sync</div>
+                            </div>
+                        </div>
+                        <!-- Tool 4 -->
+                        <div class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:shadow-md hover:scale-105 hover:border-emerald-200 transition-all cursor-default">
+                            <div class="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><i data-lucide="git-branch" class="w-5 h-5"></i></div>
+                            <div>
+                                <div class="text-sm font-bold text-slate-800">Git / Scripts</div>
+                                <div class="text-[10px] text-slate-500">Version Control</div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- Ecosystem Item 1 -->
+                <div class="p-6 rounded-2xl bg-slate-50 border border-slate-100 hover:border-brand-300 hover:bg-white transition-all group">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-4 text-blue-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="file-code-2" class="w-6 h-6"></i>
+                    </div>
+                    <h4 class="font-bold text-slate-900">VS Code / Obsidian</h4>
+                    <p class="text-xs text-slate-500 mt-2">Open the folder in any editor for bulk refactoring or visualizations.</p>
+                </div>
+
+                <!-- Ecosystem Item 2 -->
+                <div class="p-6 rounded-2xl bg-slate-50 border border-slate-100 hover:border-purple-300 hover:bg-white transition-all group">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-4 text-purple-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="bot" class="w-6 h-6"></i>
+                    </div>
+                    <h4 class="font-bold text-slate-900">AI & Cursor</h4>
+                    <p class="text-xs text-slate-500 mt-2">Feed your notes to LLMs: "Summarize my last week's mood."</p>
+                </div>
+
+                <!-- Ecosystem Item 3 -->
+                <div class="p-6 rounded-2xl bg-slate-50 border border-slate-100 hover:border-sky-300 hover:bg-white transition-all group">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-4 text-sky-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="cloud" class="w-6 h-6"></i>
+                    </div>
+                    <h4 class="font-bold text-slate-900">Any Cloud</h4>
+                    <p class="text-xs text-slate-500 mt-2">iCloud, Dropbox, Google Drive, or Git. You choose the sync engine.</p>
+                </div>
+
+                <!-- Ecosystem Item 4 -->
+                <div class="p-6 rounded-2xl bg-slate-50 border border-slate-100 hover:border-emerald-300 hover:bg-white transition-all group">
+                    <div class="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mb-4 text-emerald-600 group-hover:scale-110 transition-transform">
+                        <i data-lucide="terminal" class="w-6 h-6"></i>
+                    </div>
+                    <h4 class="font-bold text-slate-900">Automation</h4>
+                    <p class="text-xs text-slate-500 mt-2">Use scripts or Hazel to archive, back up, or append data automatically.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 3: Feature Deep Dives (Tags & Independent Notes) -->
+    <section id="features" class="py-24 px-4 overflow-hidden">
+        <div class="max-w-6xl mx-auto space-y-32">
+            
+            <!-- Dynamic Tabbed Tag System -->
+            <div id="tag-tabs-container">
+                <div class="grid md:grid-cols-2 gap-12 items-start mb-16">
+                   <div class="order-1">
+                        <div class="w-12 h-12 bg-pink-50 text-pink-600 rounded-2xl flex items-center justify-center mb-6">
+                            <i data-lucide="hash" class="w-6 h-6"></i>
+                        </div>
+                        <h2 class="text-3xl font-bold mb-4">Tags connect the dots.</h2>
+                        <p class="text-slate-600 text-lg leading-relaxed mb-6">
+                            Organization that emerges from your writing, not imposed before it. 
+                            If days are the vertical timeline, tags are the horizontal threads that weave your story together.
+                        </p>
+                   </div>
+                   <!-- This area intentionally left blank as tabs will fill the full width below -->
+                </div>
+
+                <!-- Tabbed Interface -->
+                <div class="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <!-- Tab Header -->
+                    <div class="flex flex-wrap gap-1 p-2 bg-slate-100 border-b border-slate-200" id="tabs-header">
+                        <!-- Buttons injected by JS -->
+                    </div>
+
+                    <!-- Tab Content -->
+                    <div class="p-6 md:p-10 bg-white min-h-[400px] flex items-center">
+                        <div class="grid md:grid-cols-2 gap-12 items-center w-full" id="tab-content-area">
+                            <!-- Content injected by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Independent Notes Visual -->
+            <div class="grid md:grid-cols-2 gap-16 items-center">
+                <div>
+                    <div class="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6">
+                        <i data-lucide="sticky-note" class="w-6 h-6"></i>
+                    </div>
+                    <h2 class="text-3xl font-bold mb-4">Beyond the Timeline.</h2>
+                    <p class="text-slate-600 text-lg leading-relaxed mb-6">
+                        Some thoughts are timeless. <strong>Independent Notes</strong> live alongside your daily stream but aren't bound by dates. 
+                    </p>
+                    <p class="text-slate-600 mb-6">
+                        Use them for:
+                    </p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-white border border-slate-200 p-3 rounded-lg text-sm text-slate-700 flex items-center gap-2">
+                            <i data-lucide="book" class="w-4 h-4 text-brand-500"></i> Reading Lists
+                        </div>
+                        <div class="bg-white border border-slate-200 p-3 rounded-lg text-sm text-slate-700 flex items-center gap-2">
+                            <i data-lucide="code" class="w-4 h-4 text-brand-500"></i> Code Snippets
+                        </div>
+                        <div class="bg-white border border-slate-200 p-3 rounded-lg text-sm text-slate-700 flex items-center gap-2">
+                            <i data-lucide="target" class="w-4 h-4 text-brand-500"></i> Yearly Goals
+                        </div>
+                        <div class="bg-white border border-slate-200 p-3 rounded-lg text-sm text-slate-700 flex items-center gap-2">
+                            <i data-lucide="lightbulb" class="w-4 h-4 text-brand-500"></i> Drafts
+                        </div>
+                    </div>
+                </div>
+                <div class="relative">
+                    <div class="absolute inset-0 bg-emerald-500/5 rounded-3xl transform rotate-3"></div>
+                    <div class="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden relative z-10">
+                        <div class="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-full bg-slate-300"></div>
+                            <div class="w-3 h-3 rounded-full bg-slate-300"></div>
+                            <div class="flex-1 text-center text-xs font-mono text-slate-500">reading_list_2024.md</div>
+                        </div>
+                        <div class="p-6 font-mono text-sm leading-7 text-slate-700">
+                            <h1 class="text-xl font-bold text-slate-900 mb-4"># Reading List</h1>
+                            <ul class="list-disc pl-4 space-y-2">
+                                <li><span class="line-through text-slate-400">Atomic Habits</span></li>
+                                <li>The Pragmatic Programmer</li>
+                                <li>Deep Work</li>
+                                <li>Designing Data-Intensive Applications</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- User Stories -->
+    <section id="stories" class="py-24 bg-white border-y border-slate-100">
+        <div class="max-w-6xl mx-auto px-4">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <span class="text-brand-600 font-bold tracking-wider uppercase text-sm">Community</span>
+                <h2 class="text-3xl md:text-5xl font-sans font-bold mt-2 mb-4 text-slate-900">Stories from the Flow.</h2>
+                <p class="text-slate-600 text-xl leading-relaxed">Join thousands of makers who have reclaimed their mental bandwidth.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Story 1 -->
+                <div class="bg-slate-50 p-8 rounded-3xl border border-slate-100 relative">
+                    <!-- Quote Icon -->
+                    <div class="absolute -top-4 -left-2 text-6xl text-brand-100 font-serif leading-none">“</div>
+                    <div class="relative z-10">
+                        <p class="text-slate-700 leading-relaxed mb-6 font-medium">
+                            I used to spend more time setting up Notion templates than actually writing. StreamNotes freed me. <span class="bg-brand-100 text-brand-800 px-1">I just write, tag, and forget.</span> It's liberating.
+                        </p>
+                        <div class="flex items-center gap-4">
+                            <img src="https://api.dicebear.com/9.x/avataaars/svg?seed=Sarah" alt="Sarah" class="w-12 h-12 rounded-full bg-white shadow-sm">
+                            <div>
+                                <div class="font-bold text-slate-900 text-sm">Sarah J.</div>
+                                <div class="text-xs text-slate-500">Product Manager</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Story 2 -->
+                <div class="bg-slate-50 p-8 rounded-3xl border border-slate-100 relative">
+                    <div class="absolute -top-4 -left-2 text-6xl text-brand-100 font-serif leading-none">“</div>
+                    <div class="relative z-10">
+                        <p class="text-slate-700 leading-relaxed mb-6 font-medium">
+                            I pointed Cursor AI at my StreamNotes folder and asked for a 'Year in Review'. It generated a perfect summary of my achievements <span class="bg-purple-100 text-purple-800 px-1">in 60 seconds</span>.
+                        </p>
+                        <div class="flex items-center gap-4">
+                            <img src="https://api.dicebear.com/9.x/avataaars/svg?seed=Alex" alt="Alex" class="w-12 h-12 rounded-full bg-white shadow-sm">
+                            <div>
+                                <div class="font-bold text-slate-900 text-sm">Alex C.</div>
+                                <div class="text-xs text-slate-500">Senior Developer</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Story 3 -->
+                <div class="bg-slate-50 p-8 rounded-3xl border border-slate-100 relative">
+                    <div class="absolute -top-4 -left-2 text-6xl text-brand-100 font-serif leading-none">“</div>
+                    <div class="relative z-10">
+                        <p class="text-slate-700 leading-relaxed mb-6 font-medium">
+                            I didn't trust cloud apps with my deepest thoughts. Knowing my data <span class="bg-emerald-100 text-emerald-800 px-1">never leaves my Mac</span> gives me the peace of mind to be truly honest.
+                        </p>
+                        <div class="flex items-center gap-4">
+                            <img src="https://api.dicebear.com/9.x/avataaars/svg?seed=Elena" alt="Elena" class="w-12 h-12 rounded-full bg-white shadow-sm">
+                            <div>
+                                <div class="font-bold text-slate-900 text-sm">Elena R.</div>
+                                <div class="text-xs text-slate-500">Fiction Writer</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Privacy Section -->
+    <section id="privacy" class="py-24 bg-slate-900 text-white relative overflow-hidden">
+        <div class="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
+        <div class="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-500/20 rounded-full blur-[120px] pointer-events-none"></div>
+        <div class="absolute bottom-0 left-0 w-[500px] h-[500px] bg-emerald-500/20 rounded-full blur-[120px] pointer-events-none"></div>
+
+        <div class="max-w-4xl mx-auto px-4 text-center relative z-10">
+            <h2 class="text-4xl md:text-5xl font-bold mb-16">Zero Knowledge.<br>Zero Compromise.</h2>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="glass-dark p-8 rounded-3xl text-center hover:bg-white/5 transition-colors">
+                    <div class="text-5xl font-bold text-brand-400 mb-4">0</div>
+                    <h3 class="text-xl font-bold mb-2">Servers</h3>
+                    <p class="text-slate-400 text-sm">We don't have a backend. We can't see your data even if we wanted to.</p>
+                </div>
+                <div class="glass-dark p-8 rounded-3xl text-center hover:bg-white/5 transition-colors">
+                    <div class="text-5xl font-bold text-emerald-400 mb-4">100%</div>
+                    <h3 class="text-xl font-bold mb-2">Offline</h3>
+                    <p class="text-slate-400 text-sm">No internet connection required. Code in a cabin. Write on a plane.</p>
+                </div>
+                <div class="glass-dark p-8 rounded-3xl text-center hover:bg-white/5 transition-colors">
+                    <div class="text-5xl font-bold text-purple-400 mb-4">.md</div>
+                    <h3 class="text-xl font-bold mb-2">Standard Format</h3>
+                    <p class="text-slate-400 text-sm">No proprietary databases. Your data is yours, forever.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-100 py-12">
+        <div class="max-w-6xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-2">
+                <div class="bg-slate-900 text-white p-1 rounded">
+                    <i data-lucide="pen-line" class="w-4 h-4"></i>
+                </div>
+                <span class="font-bold text-slate-900">StreamNotes</span>
+            </div>
+            
+            <div class="flex gap-8 text-sm text-slate-500 font-medium">
+                <a href="https://github.com/raywill/dailynotes" class="hover:text-slate-900 transition-colors">GitHub</a>
+                <a href="https://github.com/raywill/dailynotes/issues" class="hover:text-slate-900 transition-colors">Issues</a>
+                <a href="https://x.com/raywillhustos" class="hover:text-slate-900 transition-colors">Contact</a>
+            </div>
+
+            <p class="text-sm text-slate-400">
+                MIT License. Built for privacy.
+            </p>
+        </div>
+    </footer>
+
+    <!-- Init Logic -->
+    <script>
+        lucide.createIcons();
+        
+        // Tag Tabs Logic
+        const tagData = [
+            {
+                id: 'basic',
+                label: 'The Basics',
+                icon: 'hash',
+                title: 'Just Write Naturally',
+                desc: 'No setup required. Just add # before any word in your notes. Later, right-click the menu bar icon to see all notes with that tag.',
+                code: `
+# Meeting with Design Team
+Discussed <span class="syntax-tag">#roadmap</span> and <span class="syntax-tag">#UI</span> revisions.
+
+<span class="syntax-tag">#todo</span>: Send mockups to stakeholders
+<span class="syntax-tag">#idea</span>: Maybe use a darker shade for the sidebar?
+
+<span class="syntax-tag">#note</span> Deployment Checklist
+1. Run test suite (unit + integration)
+2. Build production assets
+3. Deploy to staging
+    `
+            },
+            {
+                id: 'reports',
+                label: 'Auto Reports',
+                icon: 'calendar',
+                title: 'Your Custom Summaries',
+                desc: 'Configure any tag to generate periodic reports. Set it once in Settings, then get one-click access forever.',
+                code: `
+<span class="syntax-comment">// Examples of Auto-Reports:</span>
+
+<span class="syntax-tag">#todo</span> weekly     <span class="syntax-comment">→ every week's tasks</span>
+<span class="syntax-tag">#meeting</span> 30 days <span class="syntax-comment">→ last month's meetings</span>
+<span class="syntax-tag">#idea</span> 1 year     <span class="syntax-comment">→ annual idea archive</span>
+<span class="syntax-tag">#health</span> 7 days   <span class="syntax-comment">→ weekly health tracking</span>
+                `
+            },
+            {
+                id: 'projects',
+                label: 'Projects',
+                icon: 'target',
+                title: 'Lightweight Management',
+                desc: 'Use tags as micro-project trackers. Generate a report to see the entire project timeline—notes, todos, decisions—all in context.',
+                code: `
+<span class="syntax-tag">#project-apollo</span> Status: In Progress
+
+<span class="syntax-tag">#todo</span>: Finalize API spec for <span class="syntax-tag">#project-apollo</span>
+<span class="syntax-tag">#todo</span>: Review security audit
+<span class="syntax-tag">#note</span>: Client wants faster timeline
+                `
+            },
+            {
+                id: 'knowledge',
+                label: 'Knowledge',
+                icon: 'brain',
+                title: 'Connect the Dots',
+                desc: 'Tags help you see patterns over time. After months, a #learning report shows your intellectual journey.',
+                code: `
+<span class="syntax-tag">#learning</span>: Rust ownership model is tricky but safe.
+<span class="syntax-tag">#insight</span>: The bottleneck is in the DB I/O.
+<span class="syntax-tag">#resource</span>: https://rust-lang.org/book
+<span class="syntax-tag">#question</span>: How does async runtime actually work?
+                `
+            },
+            {
+                id: 'people',
+                label: 'People',
+                icon: 'users',
+                title: 'Never Forget a Detail',
+                desc: 'Use @ tags to track interactions. The built-in @Someone report surfaces all mentions from the past month.',
+                code: `
+Coffee with <span class="syntax-tag">@alice</span>
+
+Discussed <span class="syntax-tag">#startup</span> idea for AI tools.
+She mentioned she knows a good VC.
+
+<span class="syntax-tag">#todo</span>: Send <span class="syntax-tag">@alice</span> the investor deck.
+                `
+            },
+            {
+                id: 'creative',
+                label: 'Creative',
+                icon: 'palette',
+                title: 'Invent Your System',
+                desc: 'There is no "right way." StreamNotes adapts to however you think. Track emotions, dreams, or wins.',
+                code: `
+<span class="syntax-tag">#win</span>: Finally fixed that race condition! 
+<span class="syntax-tag">#gratitude</span>: Beautiful sunset today.
+<span class="syntax-tag">#dream</span>: Flying over a neon city...
+<span class="syntax-tag">#quote</span>: "Simplicity is the ultimate sophistication."
+                `
+            }
+        ];
+
+        const tabsHeader = document.getElementById('tabs-header');
+        const tabsContent = document.getElementById('tab-content-area');
+        let activeTab = 0;
+
+        function renderTabs() {
+            // Render Headers
+            tabsHeader.innerHTML = tagData.map((tab, index) => `
+                <button 
+                    onclick="switchTab(${index})"
+                    class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                        activeTab === index 
+                        ? 'bg-white shadow-sm text-brand-600 ring-1 ring-slate-200/50' 
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
+                    }"
+                >
+                    <i data-lucide="${tab.icon}" class="w-4 h-4"></i>
+                    ${tab.label}
+                </button>
+            `).join('');
+            
+            // Re-initialize icons for new DOM elements
+            lucide.createIcons();
+
+            // Render Content
+            const current = tagData[activeTab];
+            tabsContent.innerHTML = `
+                <div class="animate-fade-in space-y-6">
+                    <div>
+                        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs font-bold uppercase tracking-widest mb-4">
+                            ${current.label}
+                        </div>
+                        <h3 class="text-3xl font-bold text-slate-900 mb-4">${current.title}</h3>
+                        <p class="text-lg text-slate-600 leading-relaxed">${current.desc}</p>
+                    </div>
+                    <div class="flex items-center gap-2 text-sm text-slate-400 font-medium">
+                        <i data-lucide="keyboard" class="w-4 h-4"></i>
+                        <span>Try it now in the editor view</span>
+                    </div>
+                </div>
+
+                <div class="animate-fade-in relative group">
+                     <!-- Window Controls -->
+                    <div class="absolute top-0 left-0 right-0 h-10 bg-slate-100 rounded-t-xl border-b border-slate-200 flex items-center px-4 gap-2 z-10">
+                        <div class="w-3 h-3 rounded-full bg-red-400"></div>
+                        <div class="w-3 h-3 rounded-full bg-amber-400"></div>
+                        <div class="w-3 h-3 rounded-full bg-green-400"></div>
+                        <div class="ml-4 text-xs font-mono text-slate-400">dailynotes-preview.md</div>
+                    </div>
+                    
+                    <!-- Editor Body -->
+                    <div class="bg-white rounded-xl shadow-xl border border-slate-200 pt-14 pb-8 px-8 font-mono text-sm leading-relaxed text-slate-700 min-h-[260px] relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-8 bottom-0 bg-slate-50 border-r border-slate-100 flex flex-col items-center pt-14 text-slate-300 select-none">
+                            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span>
+                        </div>
+                        <div class="pl-4 whitespace-pre-wrap">${current.code.trim()}</div>
+                        
+                        <!-- Cursor Animation -->
+                        <div class="absolute bottom-8 right-8 w-2 h-4 bg-brand-500 animate-pulse"></div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // Global function for onclick
+        window.switchTab = (index) => {
+            activeTab = index;
+            renderTabs();
+        };
+
+        // Initial render
+        renderTabs();
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
